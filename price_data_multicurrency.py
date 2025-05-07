@@ -18,7 +18,7 @@ from itertools import cycle
 
 warnings.filterwarnings("ignore")
 
-df = pd.read_csv(r"C:\Users\avni1\Documents\שנה ג\ML\midtermproject\price_data_multicurrency.csv")
+df = pd.read_csv(r"C:\Users\avni1\Documents\SeniorYear\ML\midtermproject\pythonProject\Project\price_data_multicurrency.csv.csv")
 # invalid parses become NaT
 df['TRADE_TIMESTAMP'] = pd.to_datetime(df['TRADE_TIMESTAMP'], errors='coerce')
 df['PRICE_LOG']   = np.log(df['PRICE'])                     # log of price
