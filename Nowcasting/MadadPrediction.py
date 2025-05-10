@@ -1,243 +1,207 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import statsmodels.api as sm
-from scipy.stats import zscore, probplot
-from statsmodels.tsa.stattools import adfuller, kpss
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from prophet import Prophet
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit, GridSearchCV
 from xgboost import XGBRegressor
 from keras.models import Sequential
 from keras.layers import LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', 1000)
-
-data_path = r"C:\Users\avni1\Documents\SeniorYear\ML\midtermproject\pythonProject\Nowcasting\MadadMardData.csv"
-raw_data = pd.read_csv(data_path)
-
-#check current columns
-print("Columns loaded:", raw_data.columns)
-
-#using only the relevant columns for our models to predict
-raw_data = raw_data[['credit', 'credit_time', 'madad']]
-
-
-raw_data['credit_time'] = pd.to_numeric(raw_data['credit_time'], errors='coerce')
-raw_data['credit_time'] = pd.to_datetime('1899-12-30') + pd.to_timedelta(raw_data['credit_time'], unit='D')
-credit_series = raw_data[['credit', 'credit_time']].dropna()
-credit_series.set_index('credit_time', inplace=True)
-
-madad_series = raw_data[['madad']].dropna().reset_index(drop=True)
-madad_start = pd.to_datetime('2004-01-01')
-madad_index = pd.date_range(start=madad_start, periods=len(madad_series), freq='MS')
-madad_series.index = madad_index
-
-# Differencing Madad
-diff_madad = madad_series.diff().dropna()
-def log_diff(df):
-    return np.log(df).diff().dropna()
-
-def zscore_diff(df):
-    diffed = df.diff().dropna()
-    try:
-        return diffed.apply(zscore)
-    except ValueError as e:
-        print(f"Z-score computation failed: {e}")
-        return pd.DataFrame(columns=df.columns, index=df.index)
-
-# Apply normalizations
-log_diff_credit = log_diff(credit_series)
-zscore_credit = zscore_diff(credit_series)
-log_diff_madad = log_diff(madad_series)
-zscore_madad = zscore_diff(madad_series)
-
-# ============== SCATTER PLOTS ============== #
-
-def scatter_plot(x, y, title):
-    plt.figure(figsize=(12,6))
-    sns.scatterplot(x=x, y=y)
-    plt.title(title)
-    plt.xlabel('Credit')
-    plt.ylabel('Madad')
-    plt.show()
-
-# Scatter plots for each normalization
-scatter_plot(credit_series['credit'], madad_series['madad'], "Original Data Scatterplot")
-scatter_plot(log_diff_credit['credit'], log_diff_madad['madad'], "Log Differenced Data Scatterplot")
-scatter_plot(zscore_credit['credit'], zscore_madad['madad'], "Z-score Differenced Data Scatterplot")
-
-# ---------------------------- Stationarity Tests ---------------------------- #
-
-def adf_test(series, title='ADF Test'):
-    print(f"\n{title}")
-    result = adfuller(series.dropna())
-    print(f"ADF Statistic: {result[0]}")
-    print(f"p-value: {result[1]}")
-    for key, value in result[4].items():
-        print('Critical Value (%s): %.3f' % (key, value))
-
-def kpss_test(series, title='KPSS Test'):
-    print(f"\n{title}")
-    result = kpss(series.dropna(), regression='c', nlags='auto')
-    print(f"KPSS Statistic: {result[0]}")
-    print(f"p-value: {result[1]}")
-    for key, value in result[3].items():
-        print('Critical Value (%s): %.3f' % (key, value))
-
-# Run Stationarity Tests
-adf_test(madad_series['madad'], title='ADF Test on Madad')
-kpss_test(madad_series['madad'], title='KPSS Test on Madad')
-adf_test(diff_madad['madad'], title='ADF Test on Differenced Madad')
-kpss_test(diff_madad['madad'], title='KPSS Test on Differenced Madad')
-
-# ---------------------------- Seasonal Decomposition ---------------------------- #
-
-if madad_series['madad'].dropna().shape[0] >= 24:
-    result = seasonal_decompose(madad_series['madad'].dropna(), model='additive', period=12)
-    result.plot()
-    plt.show()
-else:
-    print("Not enough data points for seasonal decomposition.")
-
-# ---------------------------- SARIMAX Modeling ---------------------------- #
-
-model = sm.tsa.statespace.SARIMAX(madad_series['madad'], order=(1,1,1), seasonal_order=(1,1,1,12))
-model_fit = model.fit(disp=False)
-print(model_fit.summary())
-
-# Residuals plots
-residuals = model_fit.resid
-plt.figure(figsize=(10,5))
-plt.plot(residuals)
-plt.title('Residuals over Time')
-plt.show()
-
-plot_acf(residuals.dropna(), lags=40)
-plt.title('ACF of Residuals')
-plt.show()
-
-plot_pacf(residuals.dropna(), lags=40)
-plt.title('PACF of Residuals')
-plt.show()
-
-plt.figure(figsize=(10,5))
-sns.histplot(residuals.dropna(), kde=True)
-plt.title('Histogram of Residuals')
-plt.show()
-
-plt.figure(figsize=(8,8))
-probplot(residuals.dropna(), dist="norm", plot=plt)
-plt.title('Q-Q Plot of Residuals')
-plt.show()
-
-# ---------------------------- Prophet Modeling ---------------------------- #
-
-prophet_df = madad_series.reset_index()
-prophet_df.columns = ['ds', 'y']
-prophet = Prophet()
-prophet.fit(prophet_df)
-future = prophet.make_future_dataframe(periods=12, freq='MS')
-forecast = prophet.predict(future)
-prophet.plot(forecast)
-plt.title('Prophet Forecast')
-plt.show()
-
-# ---------------------------- XGBoost Modeling ---------------------------- #
-
-# Create lag features
-xgb_data = madad_series.copy()
-xgb_data['lag1'] = xgb_data['madad'].shift(1)
-xgb_data['lag2'] = xgb_data['madad'].shift(2)
-xgb_data.dropna(inplace=True)
-
-X = xgb_data[['lag1', 'lag2']]
-y = xgb_data['madad']
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=False, test_size=0.2)
-
-model_xgb = XGBRegressor()
-model_xgb.fit(X_train, y_train)
-
-preds = model_xgb.predict(X_test)
-plt.figure(figsize=(10,5))
-plt.plot(y_test.index, y_test, label='True')
-plt.plot(y_test.index, preds, label='Predicted')
-plt.legend()
-plt.title('XGBoost Predictions')
-plt.show()
-
-# ---------------------------- LSTM Modeling ---------------------------- #
-
-scaler = MinMaxScaler()
-madad_scaled = scaler.fit_transform(madad_series.values)
-
-X_lstm = []
-y_lstm = []
-for i in range(3, len(madad_scaled)):
-    X_lstm.append(madad_scaled[i-3:i, 0])
-    y_lstm.append(madad_scaled[i, 0])
-X_lstm, y_lstm = np.array(X_lstm), np.array(y_lstm)
-
-X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
-
-model_lstm = Sequential()
-model_lstm.add(LSTM(50, activation='relu', input_shape=(X_lstm.shape[1], 1)))
-model_lstm.add(Dense(1))
-model_lstm.compile(optimizer='adam', loss='mse')
-
-model_lstm.fit(X_lstm, y_lstm, epochs=50, batch_size=16, verbose=1)
-
-lstm_preds = model_lstm.predict(X_lstm)
-
-plt.figure(figsize=(10,5))
-plt.plot(madad_series.index[3:], scaler.inverse_transform(lstm_preds), label='Predicted')
-plt.plot(madad_series.index[3:], scaler.inverse_transform(y_lstm.reshape(-1,1)), label='True')
-plt.legend()
-plt.title('LSTM Predictions')
-plt.show()
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-# --- Prophet Evaluation ---
-actual_prophet = prophet_df['y']
-predicted_prophet = forecast.loc[forecast['ds'].isin(prophet_df['ds']), 'yhat']
+# ─── Data Loading & Preprocessing ─────────────────────────────────────────────
 
-rmse_prophet = np.sqrt(mean_squared_error(actual_prophet, predicted_prophet))
-mae_prophet = mean_absolute_error(actual_prophet, predicted_prophet)
-mape_prophet = mean_absolute_percentage_error(actual_prophet, predicted_prophet)
+class DataHandler:
+    def __init__(self, path):
+        self.raw = pd.read_csv(path)
 
-print("\n📈 Prophet Performance:")
-print(f"RMSE: {rmse_prophet:.3f}")
-print(f"MAE:  {mae_prophet:.3f}")
-print(f"MAPE: {mape_prophet:.2f}%")
+    def load(self):
+        df = self.raw[['credit','credit_time','madad']].copy()
+        df['credit_time'] = pd.to_numeric(df['credit_time'], errors='coerce')
+        df['credit_time'] = pd.to_datetime('1899-12-30') + \
+                            pd.to_timedelta(df['credit_time'], unit='D')
+        credit = df[['credit','credit_time']].dropna().set_index('credit_time')
+        madad = df[['madad']].dropna().reset_index(drop=True)
+        madad.index = pd.date_range('2004-01-01', periods=len(madad), freq='MS')
+        return credit, madad['madad']
 
-# --- XGBoost Evaluation ---
-rmse_xgb = np.sqrt(mean_squared_error(y_test, preds))
-mae_xgb = mean_absolute_error(y_test, preds)
-mape_xgb = mean_absolute_percentage_error(y_test, preds)
+# ─── SARIMAX ───────────────────────────────────────────────────────────────────
 
-print("\n📉 XGBoost Performance:")
-print(f"RMSE: {rmse_xgb:.3f}")
-print(f"MAE:  {mae_xgb:.3f}")
-print(f"MAPE: {mape_xgb:.2f}%")
+class SarimaxModel:
+    def __init__(self, order=(1,1,1), seasonal_order=(1,1,1,12)):
+        self.order, self.sorder = order, seasonal_order
+        self.fitted = None
 
-# --- LSTM Evaluation ---
-# Note: y_lstm and lstm_preds are scaled, so we inverse transform them for proper evaluation
-y_true_lstm = scaler.inverse_transform(y_lstm.reshape(-1,1))
-y_pred_lstm = scaler.inverse_transform(lstm_preds)
+    def fit(self, series):
+        m = sm.tsa.statespace.SARIMAX(series,
+                                      order=self.order,
+                                      seasonal_order=self.sorder)
+        self.fitted = m.fit(disp=False)
+        return self.fitted
 
-rmse_lstm = np.sqrt(mean_squared_error(y_true_lstm, y_pred_lstm))
-mae_lstm = mean_absolute_error(y_true_lstm, y_pred_lstm)
-mape_lstm = mean_absolute_percentage_error(y_true_lstm, y_pred_lstm)
+    def summary(self):
+        return self.fitted.summary()
 
-print("\n🤖 LSTM Performance:")
-print(f"RMSE: {rmse_lstm:.3f}")
-print(f"MAE:  {mae_lstm:.3f}")
-print(f"MAPE: {mape_lstm:.2f}%")
+# ─── PROPHET ──────────────────────────────────────────────────────────────────
+
+class ProphetModel:
+    def __init__(self,
+                 changepoint_prior_scale: float = 0.05,
+                 seasonality_prior_scale: float = 10.0):
+        self.model = Prophet(changepoint_prior_scale=changepoint_prior_scale,
+                             seasonality_prior_scale=seasonality_prior_scale)
+        self.forecast = None
+
+    def fit(self, series, periods: int = 12):
+        df = series.reset_index()
+        df.columns = ['ds','y']
+        self.model.fit(df)
+        future = self.model.make_future_dataframe(periods=periods, freq='MS')
+        self.forecast = self.model.predict(future)
+        return self.forecast
+
+    def plot(self):
+        fig = self.model.plot(self.forecast)
+        plt.title('Prophet Forecast')
+        plt.show()
+
+# ─── XGBOOST WITH GRIDSEARCH ───────────────────────────────────────────────────
+
+class XGBModel:
+    def __init__(self,
+                 param_grid: dict = None,
+                 cv_splits: int = 5):
+        self.param_grid = param_grid or {
+            'n_estimators': [50, 100, 200],
+            'max_depth':    [3, 5, 7],
+            'learning_rate':[0.01, 0.1],
+            'subsample':    [0.8, 1.0],
+        }
+        self.cv = TimeSeriesSplit(n_splits=cv_splits)
+        self.best_model = None
+
+    def prepare(self, series):
+        df = series.to_frame('madad').copy()
+        df['lag1'] = df['madad'].shift(1)
+        df['lag2'] = df['madad'].shift(2)
+        df.dropna(inplace=True)
+        X, y = df[['lag1','lag2']], df['madad']
+        return train_test_split(X, y, shuffle=False, test_size=0.2)
+
+    def tune(self, X_train, y_train):
+        gs = GridSearchCV(
+            XGBRegressor(objective='reg:squarederror'),
+            self.param_grid,
+            cv=self.cv,
+            scoring='neg_mean_squared_error',
+            n_jobs=-1
+        )
+        gs.fit(X_train, y_train)
+        self.best_model = gs.best_estimator_
+        print("🔍 XGB Best Params:", gs.best_params_)
+
+    def fit(self, X_train, y_train):
+        if self.best_model is None:
+            self.best_model = XGBRegressor(objective='reg:squarederror')
+        self.best_model.fit(X_train, y_train)
+
+    def predict(self, X):
+        return self.best_model.predict(X)
+
+# ─── PIPELINE ORCHESTRATOR ───────────────────────────────────────────────────
+
+class TimeSeriesPipeline:
+    def __init__(self, path):
+        self.credit, self.madad = DataHandler(path).load()
+
+    def run(self):
+        # SARIMAX
+        sar = SarimaxModel()
+        sar.fit(self.madad)
+        print(sar.summary())
+        plt.figure()
+        plt.plot(self.madad.index, self.madad.values, label='Actual')
+        plt.plot(self.madad.index, sar.fitted.fittedvalues, label='Fitted')
+        plt.title('SARIMAX In-Sample Fit')
+        plt.legend()
+        plt.show()
+
+        # PROPHET
+        prop = ProphetModel()
+        fc   = prop.fit(self.madad)
+        prop.plot()
+
+        # XGBOOST
+        xgb    = XGBModel()
+        Xtr, Xte, ytr, yte = xgb.prepare(self.madad)
+        xgb.tune(Xtr, ytr)
+        xgb.fit(Xtr, ytr)
+        preds_xgb = xgb.predict(Xte)
+
+        print(">>> XGB y_test sample:", yte.head().tolist())
+        print(">>> XGB preds sample:", preds_xgb[:5].tolist())
+
+        plt.figure()
+        plt.plot(yte.index, yte.values, marker='.', label='Actual')
+        plt.plot(yte.index, preds_xgb,    marker='.', label='Predicted')
+        plt.title('XGBoost Forecast')
+        plt.legend()
+        plt.show()
+
+        # LSTM (standalone snippet)
+        madad_series = self.madad
+        scaler = MinMaxScaler()
+        madad_scaled = scaler.fit_transform(madad_series.values.reshape(-1,1))
+
+        X_lstm, y_lstm = [], []
+        for i in range(3, len(madad_scaled)):
+            X_lstm.append(madad_scaled[i-3:i, 0])
+            y_lstm.append(madad_scaled[i, 0])
+        X_lstm = np.array(X_lstm)
+        y_lstm = np.array(y_lstm)
+        X_lstm = X_lstm.reshape((X_lstm.shape[0], X_lstm.shape[1], 1))
+
+        model_lstm = Sequential([
+            LSTM(50, activation='relu', input_shape=(X_lstm.shape[1], 1)),
+            Dense(1)
+        ])
+        model_lstm.compile(optimizer='adam', loss='mse')
+        model_lstm.fit(X_lstm, y_lstm, epochs=50, batch_size=16, verbose=1)
+
+        lstm_preds = model_lstm.predict(X_lstm)
+        lstm_preds_inv = scaler.inverse_transform(lstm_preds)
+        y_lstm_inv    = scaler.inverse_transform(y_lstm.reshape(-1,1))
+
+        print(">>> [LSTM] first 5 y_true:",   y_lstm_inv[:5].flatten().tolist())
+        print(">>> [LSTM] first 5 preds:",    lstm_preds_inv[:5].flatten().tolist())
+
+        plt.figure(figsize=(10,5))
+        plt.plot(madad_series.index[3:], lstm_preds_inv, marker='.', label='Predicted')
+        plt.plot(madad_series.index[3:], y_lstm_inv,    marker='.', label='True')
+        plt.title('LSTM Predictions')
+        plt.legend()
+        plt.show()
+
+        # EVALUATION
+        def evaluate(y_true, y_pred, label):
+            rmse     = np.sqrt(mean_squared_error(y_true, y_pred))
+            mae      = mean_absolute_error(y_true, y_pred)
+            mape_val = mean_absolute_percentage_error(y_true, y_pred)
+            print(f"\n{label} Performance:")
+            print(f"  RMSE:  {rmse:.3f}")
+            print(f"  MAE:   {mae:.3f}")
+            print(f"  MAPE:  {mape_val:.2f}%")
+
+        evaluate(yte, preds_xgb,   "XGBoost")
+        evaluate(y_lstm_inv.flatten(), lstm_preds_inv.flatten(), "LSTM")
+
+if __name__ == "__main__":
+    pipeline = TimeSeriesPipeline(
+        r"C:\Users\avni1\Documents\SeniorYear\ML\midtermproject\pythonProject\Nowcasting\MadadMardData.csv"
+    )
+    pipeline.run()
