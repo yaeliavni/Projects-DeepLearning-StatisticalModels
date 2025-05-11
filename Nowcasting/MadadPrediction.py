@@ -1,7 +1,6 @@
 """ Python pipeline to compare four forecasting methods on the monthly “madad” series:
 - SARIMAX (seasonal ARIMA)
 - Prophet (Facebook’s decomposable time-series model)
-- XGBoost (gradient-boosted trees on lag features)
 - LSTM (deep-learning recurrent network)
 """
 
