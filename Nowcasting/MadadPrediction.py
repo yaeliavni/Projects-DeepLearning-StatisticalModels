@@ -1,3 +1,10 @@
+""" Python pipeline to compare four forecasting methods on the monthly “madad” series:
+- SARIMAX (seasonal ARIMA)
+- Prophet (Facebook’s decomposable time-series model)
+- XGBoost (gradient-boosted trees on lag features)
+- LSTM (deep-learning recurrent network)
+"""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,8 +21,6 @@ def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-# ─── Data Loading & Preprocessing ─────────────────────────────────────────────
-
 class DataHandler:
     def __init__(self, path):
         self.raw = pd.read_csv(path)
@@ -30,7 +35,6 @@ class DataHandler:
         madad.index = pd.date_range('2004-01-01', periods=len(madad), freq='MS')
         return credit, madad['madad']
 
-# ─── SARIMAX ───────────────────────────────────────────────────────────────────
 
 class SarimaxModel:
     def __init__(self, order=(1,1,1), seasonal_order=(1,1,1,12)):
@@ -46,8 +50,6 @@ class SarimaxModel:
 
     def summary(self):
         return self.fitted.summary()
-
-# ─── PROPHET ──────────────────────────────────────────────────────────────────
 
 class ProphetModel:
     def __init__(self,
@@ -70,51 +72,6 @@ class ProphetModel:
         plt.title('Prophet Forecast')
         plt.show()
 
-# ─── XGBOOST WITH GRIDSEARCH ───────────────────────────────────────────────────
-
-class XGBModel:
-    def __init__(self,
-                 param_grid: dict = None,
-                 cv_splits: int = 5):
-        self.param_grid = param_grid or {
-            'n_estimators': [50, 100, 200],
-            'max_depth':    [3, 5, 7],
-            'learning_rate':[0.01, 0.1],
-            'subsample':    [0.8, 1.0],
-        }
-        self.cv = TimeSeriesSplit(n_splits=cv_splits)
-        self.best_model = None
-
-    def prepare(self, series):
-        df = series.to_frame('madad').copy()
-        df['lag1'] = df['madad'].shift(1)
-        df['lag2'] = df['madad'].shift(2)
-        df.dropna(inplace=True)
-        X, y = df[['lag1','lag2']], df['madad']
-        return train_test_split(X, y, shuffle=False, test_size=0.2)
-
-    def tune(self, X_train, y_train):
-        gs = GridSearchCV(
-            XGBRegressor(objective='reg:squarederror'),
-            self.param_grid,
-            cv=self.cv,
-            scoring='neg_mean_squared_error',
-            n_jobs=-1
-        )
-        gs.fit(X_train, y_train)
-        self.best_model = gs.best_estimator_
-        print("🔍 XGB Best Params:", gs.best_params_)
-
-    def fit(self, X_train, y_train):
-        if self.best_model is None:
-            self.best_model = XGBRegressor(objective='reg:squarederror')
-        self.best_model.fit(X_train, y_train)
-
-    def predict(self, X):
-        return self.best_model.predict(X)
-
-# ─── PIPELINE ORCHESTRATOR ───────────────────────────────────────────────────
-
 class TimeSeriesPipeline:
     def __init__(self, path):
         self.credit, self.madad = DataHandler(path).load()
@@ -136,22 +93,7 @@ class TimeSeriesPipeline:
         fc   = prop.fit(self.madad)
         prop.plot()
 
-        # XGBOOST
-        xgb    = XGBModel()
-        Xtr, Xte, ytr, yte = xgb.prepare(self.madad)
-        xgb.tune(Xtr, ytr)
-        xgb.fit(Xtr, ytr)
-        preds_xgb = xgb.predict(Xte)
 
-        print(">>> XGB y_test sample:", yte.head().tolist())
-        print(">>> XGB preds sample:", preds_xgb[:5].tolist())
-
-        plt.figure()
-        plt.plot(yte.index, yte.values, marker='.', label='Actual')
-        plt.plot(yte.index, preds_xgb,    marker='.', label='Predicted')
-        plt.title('XGBoost Forecast')
-        plt.legend()
-        plt.show()
 
         # LSTM (standalone snippet)
         madad_series = self.madad
@@ -197,7 +139,6 @@ class TimeSeriesPipeline:
             print(f"  MAE:   {mae:.3f}")
             print(f"  MAPE:  {mape_val:.2f}%")
 
-        evaluate(yte, preds_xgb,   "XGBoost")
         evaluate(y_lstm_inv.flatten(), lstm_preds_inv.flatten(), "LSTM")
 
 if __name__ == "__main__":
