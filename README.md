@@ -26,8 +26,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 ```
 .
 ├── README.md
-├── requirements.txt
-└── MadadPrediction.py    # Main pipeline script
+└── MadadPrediction.py    
 ```
 
 - **MadadPrediction.py**  
