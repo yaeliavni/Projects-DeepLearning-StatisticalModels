@@ -95,6 +95,3 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 📜 License
-
-Released under the MIT License. Feel free to reuse and adapt!
