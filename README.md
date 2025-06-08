@@ -1,4 +1,4 @@
-# Time Series Forecasting Pipeline
+# Time Series Forecasting Pipeline Nowcasting
 
 A unified Python pipeline to compare four forecasting methods on the monthly **madad** series:
 
