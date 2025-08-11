@@ -8,7 +8,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 📋 Prerequisites
+##  Prerequisites
 
 - Python 3.7+  
 - Install required packages:
@@ -21,7 +21,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 🗂 Repository Structure
+##  Repository Structure
 
 ```
 .
@@ -34,7 +34,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 1. **Clone** the repository:
    ```
@@ -54,7 +54,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 🔧 Code Overview
+##  Code Overview
 
 ### DataHandler  
 - Loads `MadadMardData.csv`  
@@ -85,7 +85,7 @@ A unified Python pipeline to compare four forecasting methods on the monthly **m
 
 ---
 
-## 📈 Results & Interpretation
+## Results & Interpretation
 
 - **SARIMAX** captures trend + seasonality in-sample  
 - **Prophet** handles changepoints and missing data robustly  
